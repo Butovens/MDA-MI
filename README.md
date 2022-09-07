@@ -11,4 +11,4 @@ The missing data are coded as -9 in the data. We are interested in performing a 
 * the amount of emotional support in the home (HOMEEMO), 
 * and gender (MALE; female = 0, male = 1). 
 
-Note that there are about 33% data missing on READ4. There are complete data on all of the predictors. 
+Note that there are about 33% data missing on READ4. Data is complete on all of the predictors. 
