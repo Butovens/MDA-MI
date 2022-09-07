@@ -1,0 +1,142 @@
+---
+author: "Butovens Médé"
+date: "3/12/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+### Import libraries
+# install.packages("tidyverse", "mice", "skimr", "lavaan", "semTools", "kableExtra")
+library(tidyverse)
+library(mice)
+library(skimr)
+library(lavaan)
+library(semTools)
+library(kableExtra)
+```
+
+```{r}
+### Load data
+antisoc_data <- read_csv("antisocial.csv", col_names = T, na = "-9")
+
+### structure of data
+antisoc_data %>% skim()
+
+```
+
+# 1 FIML
+```{r}
+### Build regression model for missing data (with auxiliary variable)
+### Model Specification
+antisoc_model <- '
+### Linear regression
+read4 ~ anti1 + homecog + homeemo + male'
+
+### As there is no missing data in any of the predictor variables, we do not need to estimate variances and covariances of predictor variables separately to include them in the data.
+
+### Adding auxiliary variables
+aux.vars <- c('anti2', 'anti3', 'anti4', 'read1', 'read2', 'read3', 'momage', 'kidage')
+
+### Model estimation
+antisoc_SEM <- sem.auxiliary(model = antisoc_model, # Model
+                            data = antisoc_data, # Dataset
+                            aux = aux.vars) # Auxiliary variables to be included in model
+
+### Model summary
+summary(antisoc_SEM, rsquare = TRUE)
+
+### Standardized results
+standardizedSolution(antisoc_SEM)
+```
+
+# 2: Multiple Imputation (MI) Method
+
+```{r}
+### Set number of imputation
+m <- 100
+
+### Look at default settings fro imputation
+imput <- mice(antisoc_data, m = 1, print = F)
+
+### Look at default method used for imputation
+imput$meth
+
+### Reset imputation method from predictive mean matching to norm
+meth <- imput$meth
+meth[ c('anti2', 'anti3', 'anti4','read2', 'read3','read4')] <- "norm"
+meth
+
+### Look at predictor matrix
+imput$pred
+
+### Set variables that are not used in imputation step to zero (in imputation matrix)
+pred <- imput$pred
+pred[ ,c("antigen")] <- 0 # Variables cant1, chomecog, and chomemo are already set to zero
+pred
+
+
+### Step-1: Imputation
+imp <- mice(antisoc_data, # Dataset
+            m = m, # number of generated imputed dataset
+            meth = meth, # imputation method used
+            pred = pred, # predictor variables used to impute missing data
+            print = F)
+
+### Take a look at imputed data
+imp 
+complete(imp, "long") %>% head() # long : stack all imputed data set in one single dataframe 
+```
+
+
+# 3: Regression analysis on imputed data set
+```{r}
+### Step-2: Analysis. Fit linear regression model to each imputed dataset
+# 'with' function takes the dataframe object and applies the regression to 100 dataset 
+fit <- with(imp, # 100 imputed dataset
+            lm(read4 ~ anti1 + homecog + homeemo + male)) # Linear model to be used on 100 imputed dataset
+
+# Regression coefficient for each imputed dataset
+fit 
+
+### Step-3: Pool the results
+pool_fit <- pool(fit)
+summary(pool_fit)
+pool_fit
+```
+
+# 4: Compare/Contrast FIML and MI results
+```{r}
+### Summary table for FIML and MI results
+### Create data frame with needed values 
+df <- data.frame(term = c("anti1", "homecog", "homeemo", "male"),
+           est_FIML = c(-0.123, 0.079, 0.074, 0.011),
+           se_FIML = c(0.043, 0.028, 0.032, 0.139),
+           z_FIML = c(-2.879, 2.781, 2.288, 0.080),
+           pvalue_FIML = c(0.004, 0.005, 0.022, 0.936),
+           est_MI = c(-0.127, 0.077, 0.072, 0.007),
+           se_MI = c(0.044, 0.029, 0.033, 0.140),
+           t_MI = c(-2.898, 2.702, 2.199, 0.056),
+           pvalue_MI = c(0.004, 0.005, 0.029, 0.955)
+           )
+
+### Create table
+df %>% 
+  kbl(caption = "Summary table comparing FIML and MI results") %>% 
+  kable_classic(full_width = F, html_font = "Cambria")
+```
+
+
+When comparing the unstandardized results from FIML to MI we cannot see (in this specific model) any differences or trends that differentiate them. The coefficient estimates are very similar, the standard errors for those estimates are almost identical and their significant tests yield the same results. Thus, using both FIML or MI a researcher could arrive at the conclusions that: 
+
+* for one unit of change in anti-social behavior score, the average final reading scores in females decreases by about 0.123 points (if this is the metric used), everything else being constant.  
+* for one unit of change in at-home cognitive stimulation score, the average final reading scores in females increases by about 0.079 points (if this is the metric used), everything else being constant.  
+* for one unit of change in at-home emotional support score, the average final reading scores in females increases by about 0.074 points (if this is the metric used), everything else being constant. 
+* and that males have on average about 0.011 points in their final reading scores than females.
+
+# 5: Explanation of the Rubin’s rules of pooling parameter estimates and standard error estimates
+* The regression coefficient HOMECOG was computed by first imputing missing data on the dataset (to make it complete). Then, that step was repeated 100 times in order to generate multiple datasets with different imputed values. Once the 100 imputed datasets (with different imputed values) were created, a regression analysis was done to all the imputed datasets and a set of parameter estimates was created for each imputed dataset. Thus, 100 estimates for HOMECOG were created following the regression analysis. Finally the arithmetic average of each estimate was computed to give one final estimate. Thus, the 100 estimates for HOMECOG were average to give one final result.
+* In addition, 100 standard errors of the estimate were also created following the regression analysis. The 100 standard errors for HOMECOG were squared (to obtain the variance) and the 100 variance values were averaged to give the within imputation variance for the estimate. 
+* Then, the deviations from the averaged HOMECOG estimate was computed (using the 100 estimates from the regressions). Those 100 deviations were squared, then summed and finally divided by the number of imputed dataset (minus one).This gave the between-imputation variance. In other words, the sample variance formula was used to compute the between-imputation variance.
+* The total variance was then computed by adding the within-imputation variance, the between-imputation variance and a term that took into account the effect of the number of imputations. (That term is the between-imputation variance divided by the number of imputation)
+* Last, the standard error of the HOMECOG estimate was obtained by taking the square root of the total variance.
